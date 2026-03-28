@@ -1,0 +1,460 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Stats Cards -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Space Saved (New Links)</div>
+        <div class="mt-1 text-3xl font-bold text-indigo-600 dark:text-indigo-400" id="stat-saved">{{ total_saved | format_bytes }}</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Existing Hardlinks Savings</div>
+        <div class="mt-1 text-3xl font-bold text-emerald-600 dark:text-emerald-400" id="stat-existing">{{ total_existing_saved | format_bytes }}</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <div class="text-sm font-medium text-gray-500 dark:text-gray-400">New Hardlinks Created</div>
+        <div class="mt-1 text-3xl font-bold text-indigo-600 dark:text-indigo-400" id="stat-links">{{ "{:,}".format(total_links) }}</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Total Runs</div>
+        <div class="mt-1 text-3xl font-bold text-indigo-600 dark:text-indigo-400" id="stat-runs">{{ total_runs }}</div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <div class="text-sm font-medium text-gray-500 dark:text-gray-400">Last Run</div>
+        <div class="mt-1" id="stat-last-run">
+            {% if last_run %}
+                <span class="text-lg font-semibold
+                    {% if last_run.status == 'completed' %}text-green-600 dark:text-green-400
+                    {% elif last_run.status == 'failed' %}text-red-600 dark:text-red-400
+                    {% elif last_run.status == 'running' %}text-yellow-600 dark:text-yellow-400
+                    {% elif last_run.status == 'cancelled' %}text-gray-600 dark:text-gray-400
+                    {% endif %}
+                ">{{ last_run.status | capitalize }}</span>
+                <div class="text-sm text-gray-500 dark:text-gray-400">{{ last_run.started_at | time_ago }}</div>
+            {% else %}
+                <span class="text-lg text-gray-400 dark:text-gray-500">No runs yet</span>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Run Controls & Progress -->
+<div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-8">
+    <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+        <div class="flex items-center gap-3">
+            <button
+                id="btn-run"
+                hx-post="/api/run"
+                hx-swap="none"
+                class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                {% if is_running %}disabled{% endif %}
+            >
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                Run Now
+            </button>
+            <button
+                id="btn-cancel"
+                hx-post="/api/cancel"
+                hx-swap="none"
+                class="inline-flex items-center px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 dark:focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                {% if not is_running %}disabled{% endif %}
+            >
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+                Cancel
+            </button>
+        </div>
+        <div id="next-run-display" class="text-sm text-gray-500 dark:text-gray-400">
+            {% if next_run %}
+                Next scheduled run: <span class="font-medium text-gray-700 dark:text-gray-300">{{ next_run.strftime('%Y-%m-%d %H:%M') }}</span>
+            {% else %}
+                No scheduled runs
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Progress Area -->
+    <div id="progress-area">
+        <div class="flex items-center gap-2 mb-2">
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Status:</span>
+            <span id="progress-phase" class="text-sm font-semibold
+                {% if progress.phase == 'idle' %}text-gray-500
+                {% elif progress.phase == 'completed' %}text-green-600 dark:text-green-400
+                {% elif progress.phase == 'failed' %}text-red-600 dark:text-red-400
+                {% elif progress.phase == 'cancelled' %}text-gray-600 dark:text-gray-400
+                {% else %}text-yellow-600 dark:text-yellow-400
+                {% endif %}
+            ">{{ progress.phase | capitalize }}</span>
+        </div>
+
+        <!-- Progress Bar -->
+        <div id="progress-bar-container" class="{% if progress.phase == 'idle' %}hidden{% endif %}">
+            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 mb-2 overflow-hidden">
+                <div id="progress-bar" class="h-3 rounded-full transition-all duration-300
+                    {% if progress.phase in ['completed'] %}bg-green-500
+                    {% elif progress.phase in ['failed'] %}bg-red-500
+                    {% elif progress.phase in ['cancelled'] %}bg-gray-400
+                    {% else %}bg-indigo-500
+                    {% endif %}"
+                    style="width: {% if progress.total > 0 %}{{ (progress.current / progress.total * 100) | int }}{% else %}0{% endif %}%">
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
+                <span id="progress-message">{{ progress.message }}</span>
+            </div>
+            <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-500 dark:text-gray-400 mt-1">
+                <span>Files: <strong id="progress-files" class="text-gray-700 dark:text-gray-300">{{ "{:,}".format(progress.files_scanned) }}</strong></span>
+                <span>Duplicates: <strong id="progress-dupes" class="text-gray-700 dark:text-gray-300">{{ "{:,}".format(progress.duplicates_found) }}</strong></span>
+                <span>New Links: <strong id="progress-links" class="text-gray-700 dark:text-gray-300">{{ "{:,}".format(progress.links_created) }}</strong></span>
+                <span>Saved: <strong id="progress-saved" class="text-gray-700 dark:text-gray-300">{{ progress.space_saved | format_bytes }}</strong></span>
+                <span>Existing Links: <strong id="progress-existing-links" class="text-gray-700 dark:text-gray-300">{{ "{:,}".format(progress.existing_links_found) }}</strong></span>
+                <span>Existing Saved: <strong id="progress-existing-saved" class="text-gray-700 dark:text-gray-300">{{ progress.existing_space_saved | format_bytes }}</strong></span>
+            </div>
+
+            <!-- Current file sub-progress -->
+            <div id="file-progress-container" class="mt-3 hidden">
+                <div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    <span class="truncate max-w-xl" id="file-progress-name" title=""></span>
+                    <span id="file-progress-pct" class="whitespace-nowrap font-medium"></span>
+                </div>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                    <div id="file-progress-bar" class="h-1.5 rounded-full bg-indigo-400 dark:bg-indigo-500 transition-all duration-150" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Settings -->
+<div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-8">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Configuration</h2>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+        <div>
+            <span class="text-gray-500 dark:text-gray-400">Scan Directories</span>
+            <div class="font-medium text-gray-900 dark:text-gray-100 mt-1">
+                {% for dir in settings.scan_dirs_list %}
+                    <code class="bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded text-xs">{{ dir }}</code>
+                {% endfor %}
+            </div>
+        </div>
+        <div>
+            <span class="text-gray-500 dark:text-gray-400">Minimum File Size</span>
+            <div class="font-medium text-gray-900 dark:text-gray-100 mt-1">{{ settings.hardlinker_min_size | format_bytes }}</div>
+        </div>
+        <div>
+            <span class="text-gray-500 dark:text-gray-400">Schedule</span>
+            <div class="font-medium text-gray-900 dark:text-gray-100 mt-1"><code class="bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded text-xs">{{ settings.hardlinker_schedule }}</code></div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Hardlinks -->
+<div class="bg-white dark:bg-gray-800 rounded-lg shadow mb-8">
+    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Recent Hardlinks</h2>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+            <thead class="bg-gray-50 dark:bg-gray-900">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Source</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Linked File</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Size</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date</th>
+                </tr>
+            </thead>
+            <tbody id="hardlinks-table" class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                {% if recent_links %}
+                    {% for link in recent_links %}
+                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                        <td class="px-6 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate" title="{{ link.source_path }}">{{ link.source_path }}</td>
+                        <td class="px-6 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate" title="{{ link.linked_path }}">{{ link.linked_path }}</td>
+                        <td class="px-6 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ link.file_size | format_bytes }}</td>
+                        <td class="px-6 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ link.created_at | time_ago }}</td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="4" class="px-6 py-8 text-center text-sm text-gray-400 dark:text-gray-500">No hardlinks created yet. Click "Run Now" to start.</td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Run History -->
+<div class="bg-white dark:bg-gray-800 rounded-lg shadow">
+    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Run History</h2>
+    </div>
+    <div id="run-history" class="divide-y divide-gray-200 dark:divide-gray-700">
+        {% if run_history %}
+            {% for run in run_history %}
+            <div class="px-6 py-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                <span class="font-medium text-gray-700 dark:text-gray-300">Run #{{ run.id }}</span>
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                    {% if run.trigger == 'manual' %}bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300
+                    {% else %}bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300
+                    {% endif %}
+                ">{{ run.trigger | capitalize }}</span>
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                    {% if run.status == 'completed' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300
+                    {% elif run.status == 'failed' %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300
+                    {% elif run.status == 'running' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300
+                    {% elif run.status == 'cancelled' %}bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300
+                    {% endif %}
+                ">{{ run.status | capitalize }}</span>
+                <span class="text-gray-500 dark:text-gray-400">{{ "{:,}".format(run.links_created) }} links</span>
+                <span class="text-gray-500 dark:text-gray-400">{{ run.space_saved | format_bytes }} saved</span>
+                <span class="text-gray-400 dark:text-gray-500">{{ run.started_at | time_ago }}</span>
+                {% if run.error_message %}
+                    <span class="text-red-500 dark:text-red-400 text-xs">{{ run.error_message | truncate(80) }}</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="px-6 py-8 text-center text-sm text-gray-400 dark:text-gray-500">No runs yet.</div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- SSE Progress Script -->
+<script>
+(function() {
+    const evtSource = new EventSource('/api/progress');
+
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KiB', 'MiB', 'GiB', 'TiB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    function formatNumber(n) {
+        return n.toLocaleString();
+    }
+
+    function timeAgo(dateStr) {
+        if (!dateStr) return 'never';
+        const seconds = Math.floor((new Date() - new Date(dateStr)) / 1000);
+        if (seconds < 60) return 'just now';
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return minutes + ' minute' + (minutes !== 1 ? 's' : '') + ' ago';
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return hours + ' hour' + (hours !== 1 ? 's' : '') + ' ago';
+        const days = Math.floor(hours / 24);
+        return days + ' day' + (days !== 1 ? 's' : '') + ' ago';
+    }
+
+    function basename(path) {
+        return path.split('/').pop();
+    }
+
+    const phaseColors = {
+        idle: 'text-gray-500',
+        scanning: 'text-yellow-600 dark:text-yellow-400',
+        hashing_partial: 'text-yellow-600 dark:text-yellow-400',
+        hashing_full: 'text-yellow-600 dark:text-yellow-400',
+        linking: 'text-yellow-600 dark:text-yellow-400',
+        completed: 'text-green-600 dark:text-green-400',
+        failed: 'text-red-600 dark:text-red-400',
+        cancelled: 'text-gray-600 dark:text-gray-400',
+    };
+
+    const barColors = {
+        idle: 'bg-gray-300',
+        scanning: 'bg-indigo-500',
+        hashing_partial: 'bg-indigo-500',
+        hashing_full: 'bg-indigo-500',
+        linking: 'bg-indigo-500',
+        completed: 'bg-green-500',
+        failed: 'bg-red-500',
+        cancelled: 'bg-gray-400',
+    };
+
+    const statusColors = {
+        completed: 'text-green-600 dark:text-green-400',
+        failed: 'text-red-600 dark:text-red-400',
+        running: 'text-yellow-600 dark:text-yellow-400',
+        cancelled: 'text-gray-600 dark:text-gray-400',
+    };
+
+    const badgeClasses = {
+        completed: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
+        failed: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300',
+        running: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300',
+        cancelled: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
+    };
+
+    const triggerClasses = {
+        manual: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300',
+        schedule: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300',
+    };
+
+    function refreshDashboard() {
+        fetch('/api/stats').then(r => r.json()).then(function(stats) {
+            var el;
+            el = document.getElementById('stat-saved');
+            if (el) el.textContent = stats.total_space_saved_human;
+            el = document.getElementById('stat-existing');
+            if (el) el.textContent = stats.total_existing_space_saved_human;
+            el = document.getElementById('stat-links');
+            if (el) el.textContent = formatNumber(stats.total_links_created);
+            el = document.getElementById('stat-runs');
+            if (el) el.textContent = formatNumber(stats.total_runs);
+
+            // Last run card
+            var lastRunEl = document.getElementById('stat-last-run');
+            if (lastRunEl && stats.last_run) {
+                var color = statusColors[stats.last_run.status] || '';
+                lastRunEl.innerHTML = '<span class="text-lg font-semibold ' + color + '">' +
+                    stats.last_run.status.charAt(0).toUpperCase() + stats.last_run.status.slice(1) +
+                    '</span><div class="text-sm text-gray-500 dark:text-gray-400">' +
+                    timeAgo(stats.last_run.started_at) + '</div>';
+            }
+
+            // Next run
+            var nextEl = document.getElementById('next-run-display');
+            if (nextEl && stats.next_run_at) {
+                var d = new Date(stats.next_run_at);
+                nextEl.innerHTML = 'Next scheduled run: <span class="font-medium text-gray-700 dark:text-gray-300">' +
+                    d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') +
+                    ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + '</span>';
+            }
+        });
+
+        fetch('/api/history').then(r => r.json()).then(function(runs) {
+            var container = document.getElementById('run-history');
+            if (!container) return;
+            if (!runs.length) {
+                container.innerHTML = '<div class="px-6 py-8 text-center text-sm text-gray-400 dark:text-gray-500">No runs yet.</div>';
+                return;
+            }
+            container.innerHTML = runs.map(function(run) {
+                var trigger = triggerClasses[run.trigger] || triggerClasses.schedule;
+                var badge = badgeClasses[run.status] || '';
+                var err = run.error_message ? '<span class="text-red-500 dark:text-red-400 text-xs">' + run.error_message.substring(0, 80) + '</span>' : '';
+                return '<div class="px-6 py-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">' +
+                    '<span class="font-medium text-gray-700 dark:text-gray-300">Run #' + run.id + '</span>' +
+                    '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ' + trigger + '">' +
+                        run.trigger.charAt(0).toUpperCase() + run.trigger.slice(1) + '</span>' +
+                    '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ' + badge + '">' +
+                        run.status.charAt(0).toUpperCase() + run.status.slice(1) + '</span>' +
+                    '<span class="text-gray-500 dark:text-gray-400">' + formatNumber(run.links_created) + ' links</span>' +
+                    '<span class="text-gray-500 dark:text-gray-400">' + formatBytes(run.space_saved) + ' saved</span>' +
+                    '<span class="text-gray-400 dark:text-gray-500">' + timeAgo(run.started_at) + '</span>' +
+                    err + '</div>';
+            }).join('');
+        });
+
+        fetch('/api/links/recent').then(r => r.json()).then(function(links) {
+            var tbody = document.getElementById('hardlinks-table');
+            if (!tbody) return;
+            if (!links.length) {
+                tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-8 text-center text-sm text-gray-400 dark:text-gray-500">No hardlinks created yet. Click "Run Now" to start.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = links.map(function(link) {
+                return '<tr class="hover:bg-gray-50 dark:hover:bg-gray-700">' +
+                    '<td class="px-6 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate" title="' + link.source_path + '">' + link.source_path + '</td>' +
+                    '<td class="px-6 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate" title="' + link.linked_path + '">' + link.linked_path + '</td>' +
+                    '<td class="px-6 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">' + formatBytes(link.file_size) + '</td>' +
+                    '<td class="px-6 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">' + timeAgo(link.created_at) + '</td></tr>';
+            }).join('');
+        });
+    }
+
+    evtSource.addEventListener('progress', function(e) {
+        const data = JSON.parse(e.data);
+
+        // Phase label
+        const phaseEl = document.getElementById('progress-phase');
+        if (phaseEl) {
+            phaseEl.textContent = data.phase.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+            phaseEl.className = 'text-sm font-semibold ' + (phaseColors[data.phase] || 'text-gray-500');
+        }
+
+        // Progress bar
+        const barContainer = document.getElementById('progress-bar-container');
+        const bar = document.getElementById('progress-bar');
+        if (barContainer && bar) {
+            if (data.phase === 'idle') {
+                barContainer.classList.add('hidden');
+            } else {
+                barContainer.classList.remove('hidden');
+                const pct = data.total > 0 ? Math.round(data.current / data.total * 100) : 0;
+                bar.style.width = pct + '%';
+                bar.className = 'h-3 rounded-full transition-all duration-300 ' + (barColors[data.phase] || 'bg-indigo-500');
+                if (['scanning', 'hashing_partial', 'hashing_full', 'linking'].includes(data.phase) && data.total === 0) {
+                    bar.style.width = '100%';
+                    bar.classList.add('pulse-bar');
+                } else {
+                    bar.classList.remove('pulse-bar');
+                }
+            }
+        }
+
+        // Message
+        const msgEl = document.getElementById('progress-message');
+        if (msgEl) msgEl.textContent = data.message;
+
+        // Counters
+        const filesEl = document.getElementById('progress-files');
+        if (filesEl) filesEl.textContent = formatNumber(data.files_scanned);
+
+        const dupesEl = document.getElementById('progress-dupes');
+        if (dupesEl) dupesEl.textContent = formatNumber(data.duplicates_found);
+
+        const linksEl = document.getElementById('progress-links');
+        if (linksEl) linksEl.textContent = formatNumber(data.links_created);
+
+        const savedEl = document.getElementById('progress-saved');
+        if (savedEl) savedEl.textContent = formatBytes(data.space_saved);
+
+        const existLinksEl = document.getElementById('progress-existing-links');
+        if (existLinksEl) existLinksEl.textContent = formatNumber(data.existing_links_found);
+
+        const existSavedEl = document.getElementById('progress-existing-saved');
+        if (existSavedEl) existSavedEl.textContent = formatBytes(data.existing_space_saved);
+
+        // File-level progress (during full hashing)
+        const fileContainer = document.getElementById('file-progress-container');
+        const fileName = document.getElementById('file-progress-name');
+        const filePct = document.getElementById('file-progress-pct');
+        const fileBar = document.getElementById('file-progress-bar');
+        if (fileContainer && data.current_file && data.phase === 'hashing_full') {
+            fileContainer.classList.remove('hidden');
+            fileName.textContent = basename(data.current_file);
+            fileName.title = data.current_file;
+            const pct = data.current_file_size > 0 ? Math.round(data.current_file_progress / data.current_file_size * 100) : 0;
+            filePct.textContent = formatBytes(data.current_file_progress) + ' / ' + formatBytes(data.current_file_size);
+            fileBar.style.width = pct + '%';
+        } else if (fileContainer) {
+            fileContainer.classList.add('hidden');
+        }
+
+        // Buttons
+        const btnRun = document.getElementById('btn-run');
+        const btnCancel = document.getElementById('btn-cancel');
+        const isActive = ['scanning', 'hashing_partial', 'hashing_full', 'linking'].includes(data.phase);
+        if (btnRun) btnRun.disabled = isActive;
+        if (btnCancel) btnCancel.disabled = !isActive;
+
+        // Refresh stats and tables when run completes (no page reload)
+        if (['completed', 'failed', 'cancelled'].includes(data.phase) && data.finished_at) {
+            setTimeout(refreshDashboard, 1000);
+        }
+    });
+
+    evtSource.onerror = function() {
+        // Reconnect is handled automatically by EventSource
+    };
+})();
+</script>
+{% endblock %}

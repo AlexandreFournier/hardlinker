@@ -1,0 +1,22 @@
+services:
+  hardlinker:
+    build: .
+    image: ghcr.io/alexandrefournier/hardlinker:latest
+    container_name: hardlinker
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - HARDLINKER_BASEURL=http://localhost:8000
+      - HARDLINKER_SCAN_DIRS=/data
+      - HARDLINKER_MIN_SIZE=67108864
+      - HARDLINKER_SCHEDULE=0 3 * * *
+    volumes:
+      # Mount your storage directory — all scan dirs must be on the same filesystem
+      - /path/to/your/storage:/data:rw
+      # Persistent database
+      - hardlinker_db:/app/data
+
+volumes:
+  hardlinker_db:
+    driver: local
