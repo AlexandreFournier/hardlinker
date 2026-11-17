@@ -1,6 +1,6 @@
 [project]
 name = "hardlinker"
-version = "1.0.2"
+version = "1.0.3"
 description = "Docker app to find and hardlink duplicate large files across mounted volumes"
 requires-python = ">=3.12"
 dependencies = [

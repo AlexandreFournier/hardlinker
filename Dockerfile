@@ -25,6 +25,11 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
+# pip/setuptools (and their vendored urllib3, msgpack) are not needed at runtime
+RUN /opt/venv/bin/python -m pip uninstall -y pip setuptools 2>/dev/null; \
+    /usr/local/bin/python -m pip uninstall -y pip setuptools 2>/dev/null; \
+    rm -rf /usr/local/lib/python3.13/ensurepip; true
+
 COPY app/ /app/app/
 
 RUN mkdir -p /app/data
