@@ -16,6 +16,10 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 FROM python:3.13-slim
 
+# Pull in Debian security fixes not yet in the base image
+RUN apt-get update && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
